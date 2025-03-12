@@ -6,6 +6,7 @@ import fs from 'fs';
 import { serviceAuth, AuthenticatedRequest } from '../middleware/serviceAuth';
 import { mediaCache } from '../config/cache';
 import { MediaFile } from '../interfaces/MediaFile';
+import { MediaRepository } from '../repositories/MediaRepository';
 
 const router = Router();
 
@@ -329,6 +330,213 @@ router.delete('/:entityId/:position',
         } catch (error) {
             console.error('Delete error:', error);
             res.status(500).json({ error: 'Failed to delete file' });
+        }
+    }
+);
+
+/**
+ * Simplify the storage config to just use a temp name
+ */
+const logoStorage = multer.diskStorage({
+    destination: (req, file, cb) => {
+        const uploadDir = path.join(__dirname, '../../uploads/logos');
+        if (!fs.existsSync(uploadDir)) {
+            fs.mkdirSync(uploadDir, { recursive: true });
+        }
+        cb(null, uploadDir);
+    },
+    filename: (req, file, cb) => {
+        // Just use a temp name initially
+        const ext = path.extname(file.originalname);
+        cb(null, `temp-${Date.now()}${ext}`);
+    }
+});
+
+const logoUpload = multer({
+    storage: logoStorage,
+    fileFilter: (req, file, cb) => {
+        console.log('File filter running:', {
+            body: req.body,
+            file: file.originalname
+        });
+        if (ALLOWED_MIME_TYPES.includes(file.mimetype)) {
+            cb(null, true);
+        } else {
+            cb(new Error(`Invalid file type: ${file.mimetype}`));
+        }
+    }
+});
+
+/**
+ * Upload company logo
+ * @route POST /api/media/company-logo
+ */
+router.post('/company-logo',
+    serviceAuth(),
+    logoUpload.single('file'),
+    async (req: AuthenticatedRequest, res) => {
+        console.log('POST /company-logo called:', {
+            file: req.file,
+            body: req.body,
+            service: req.service
+        });
+
+        try {
+            const file = req.file;
+            const companyId = req.body.companyId;
+
+            if (!file) {
+                console.error('No file received in request');
+                return res.status(400).json({ error: 'No file uploaded' });
+            }
+
+            if (!companyId) {
+                console.error('Missing company ID');
+                return res.status(400).json({ error: 'Company ID is required' });
+            }
+
+            // Create the final filename
+            const ext = path.extname(file.originalname);
+            const newFilename = `logo-${companyId}${ext}`;
+            const newPath = path.join(path.dirname(file.path), newFilename);
+
+            // Delete any existing logo file
+            const uploadDir = path.join(__dirname, '../../uploads/logos');
+            const existingFiles = fs.readdirSync(uploadDir)
+                .filter(filename => filename.startsWith(`logo-${companyId}`));
+
+            for (const existingFile of existingFiles) {
+                const filePath = path.join(uploadDir, existingFile);
+                if (fs.existsSync(filePath)) {
+                    fs.unlinkSync(filePath);
+                }
+            }
+
+            // Rename the temp file to the final name
+            fs.renameSync(file.path, newPath);
+
+            const mediaFile = {
+                id: uuidv4(),
+                entityId: companyId,
+                entityType: 'company-logo',
+                companyId: companyId,
+                filename: newFilename,
+                originalName: file.originalname,
+                mimeType: file.mimetype,
+                size: file.size,
+                path: newPath,
+                createdAt: new Date()
+            };
+
+            // Cache the file metadata
+            mediaCache.set(`company-logo-${companyId}`, mediaFile);
+
+            // Create metadata JSON file
+            const metadataPath = path.join(__dirname, '../../uploads/logos', `logo-${companyId}.json`);
+            await fs.promises.writeFile(
+                metadataPath,
+                JSON.stringify(mediaFile, null, 2)
+            );
+
+            console.log('Company logo upload successful:', mediaFile);
+
+            res.json(mediaFile);
+        } catch (error) {
+            console.error('Error in POST /company-logo:', error);
+            res.status(500).json({ error: 'Failed to process company logo upload' });
+        }
+    }
+);
+
+/**
+ * Get company logo
+ * @route GET /api/media/company-logo/:companyId
+ */
+router.get('/company-logo/:companyId',
+    serviceAuth(),
+    async (req: AuthenticatedRequest, res) => {
+        console.log('GET /company-logo/:companyId called:', {
+            params: req.params,
+            service: req.service
+        });
+
+        try {
+            const { companyId } = req.params;
+
+            if (!companyId) {
+                return res.status(400).json({ error: 'Company ID is required' });
+            }
+
+            // Check for existing logo
+            const uploadDir = path.join(__dirname, '../../uploads/logos');
+            const files = fs.readdirSync(uploadDir)
+                .filter(filename => filename.startsWith(`logo-${companyId}`) && !filename.endsWith('.json'));
+
+            if (files.length === 0) {
+                return res.status(404).json({ error: 'Logo not found' });
+            }
+
+            const logoFile = files[0]; // Get the first (and should be only) matching file
+            const logoPath = path.join(uploadDir, logoFile);
+
+            // Read metadata
+            const metadataPath = path.join(uploadDir, `logo-${companyId}.json`);
+            let metadata = null;
+
+            if (fs.existsSync(metadataPath)) {
+                metadata = JSON.parse(await fs.promises.readFile(metadataPath, 'utf8'));
+            }
+
+            // Set Cache-Control header for better performance
+            res.setHeader('Cache-Control', 'public, max-age=31536000'); // 1 year
+            res.setHeader('Access-Control-Allow-Origin', '*');
+
+            if (req.query.metadata === 'true') {
+                // Return metadata if requested
+                return res.json({
+                    ...metadata,
+                    url: `/api/media/company-logo/${companyId}/file`
+                });
+            }
+
+            // Otherwise serve the file
+            res.sendFile(logoPath);
+
+        } catch (error) {
+            console.error('Error in GET /company-logo/:companyId:', error);
+            res.status(500).json({ error: 'Failed to retrieve company logo' });
+        }
+    }
+);
+
+/**
+ * Get company logo file
+ * @route GET /api/media/company-logo/:companyId/file
+ */
+router.get('/company-logo/file/:companyId',
+    async (req, res) => {
+        try {
+            console.log("HIT2")
+            const { companyId } = req.params;
+            const uploadDir = path.join(__dirname, '../../uploads/logos');
+            const files = fs.readdirSync(uploadDir)
+                .filter(filename => filename.startsWith(`logo-${companyId}`) && !filename.endsWith('.json'));
+
+            if (files.length === 0) {
+                return res.status(404).json({ error: 'Logo not found' });
+            }
+
+            const logoFile = files[0];
+            const logoPath = path.join(uploadDir, logoFile);
+
+            // Set Cache-Control header for better performance
+            res.setHeader('Cache-Control', 'public, max-age=31536000'); // 1 year
+            res.setHeader('Access-Control-Allow-Origin', '*');
+
+            res.sendFile(logoPath);
+        } catch (error) {
+            console.error('Error serving logo file:', error);
+            res.status(500).json({ error: 'Failed to serve logo file' });
         }
     }
 );

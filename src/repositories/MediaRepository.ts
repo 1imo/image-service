@@ -11,6 +11,7 @@ interface MediaFile {
     mimeType: string;
     size: number;
     position: number;
+    path: string;
     createdAt: Date;
     updatedAt: Date;
 }
@@ -27,8 +28,8 @@ export class MediaRepository {
             `INSERT INTO media_files (
                 entity_id, entity_type, company_id,
                 filename, original_name, mime_type,
-                size, position
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                size, position, path
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
             RETURNING *`,
             [
                 data.entityId,
@@ -38,7 +39,8 @@ export class MediaRepository {
                 data.originalName,
                 data.mimeType,
                 data.size,
-                data.position
+                data.position,
+                data.path
             ]
         );
         return result.rows[0];

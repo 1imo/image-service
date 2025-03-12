@@ -2,6 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import mediaRoutes from './routes/mediaRoutes';
+import path from 'path';
 
 /**
  * Image Service Application
@@ -23,6 +24,8 @@ const port = process.env.PORT || 3006;
 // Middleware
 app.use(cors());
 app.use(express.json());
+
+// Serve static files from uploads directory
 
 // Routes
 app.use('/api/media', mediaRoutes);
