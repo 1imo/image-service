@@ -8,7 +8,7 @@ import { MediaFile } from '../interfaces/MediaFile';
  * - No cloning of stored objects
  */
 export const mediaCache = new NodeCache({
-    stdTTL: 7200, // 2 hours
-    checkperiod: 600, // Check for expired entries every 10 minutes
+    stdTTL: 1, // 2 hours
+    checkperiod: 1, // Check for expired entries every 10 minutes
     useClones: false
 }); 

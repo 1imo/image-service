@@ -517,7 +517,7 @@ router.get('/company-logo/file/:companyId',
     async (req, res) => {
         try {
             console.log("HIT2")
-            const { companyId } = req.params;
+            const companyId = req.params.companyId.split('.')[0]; // Extract base ID without extension
             const uploadDir = path.join(__dirname, '../../uploads/logos');
             const files = fs.readdirSync(uploadDir)
                 .filter(filename => filename.startsWith(`logo-${companyId}`) && !filename.endsWith('.json'));
@@ -526,7 +526,14 @@ router.get('/company-logo/file/:companyId',
                 return res.status(404).json({ error: 'Logo not found' });
             }
 
-            const logoFile = files[0];
+            // Sort files by creation time and get the most recent one
+            const logoFile = files
+                .map(file => ({
+                    name: file,
+                    time: fs.statSync(path.join(uploadDir, file)).mtime.getTime()
+                }))
+                .sort((a, b) => b.time - a.time)[0].name;
+
             const logoPath = path.join(uploadDir, logoFile);
 
             // Set Cache-Control header for better performance
@@ -541,4 +548,4 @@ router.get('/company-logo/file/:companyId',
     }
 );
 
-export default router; 
+export default router;
